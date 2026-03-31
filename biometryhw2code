@@ -1,13 +1,8 @@
 library(dplyr)
 library(ggplot2)
-library(ggthemes)
 library(car)
 library(emmeans)
 library(broom)
-
-# Question 1: Are there differences in fish density (individuals/volume) among seasons?
-# Question 2: Are there differences in fish density among flow regimes?
-# Response variable: total fish density (number/habitat volume (TOTDENVOL)
 
 ####################
 ### PRE-ANALYSIS ###
@@ -162,7 +157,7 @@ mod <- lm(TOTDENVOL ~ SEASON * FLOWREGIME,
 # Sample sizes are unbalanced, so will use a Type III ANOVA.
 Anova(mod, type=3)
 
-# There are significant differences in fish density among seasons (p = 0.007).
+# There are significant differences in fish density among seasons (p < 0.001).
 # There are not significant differences in fish density among flow regimes (p = 0.547).
 # The relationship between fish density and seasons is different between flow regimes (p < 0.001).
 
@@ -199,6 +194,23 @@ estmeans$contrasts # Fish densities of groundwater streams do not differ much be
 # presumably lead to the higher fish densities in the later months are presumably
 # persistent into October. 
 
+#############################
+### POST-HOC VOLUME ANOVA ###
+#############################
+
+# Post-hoc ANOVA of water volume by season and flow regime
+# just to see if the trends match up with the patterns of fish density.
+# Thought of doing this after running the rest of the analyses and just included
+# it in the assignment as an aside since we were not asked to do any analysis 
+# as to the why of observed patterns but thought it would be useful to include
+# in the discussion. That's why I don't really mention it in the paper.
+modvol <- lm(VOLUME ~ SEASON * FLOWREGIME,
+             data = fish,
+             contrasts = list(SEASON = contr.sum))
+
+estmeansvol <- emmeans(modvol, pairwise ~ SEASON | FLOWREGIME)
+estmeansvol$contrasts
+
 #####################
 ### VISUALIZATION ###
 #####################
@@ -213,13 +225,11 @@ res_emmeans <- estmeans$contrasts
 emmeans_table <- tidy(res_emmeans)
 write.csv(emmeans_table, "emmeans_results.csv", row.names = FALSE)
 
-# Confidence intervals for pairwise comparisons of fish densities
-# between seasons within flow regimes.
+# Confidence intervals for fish densities between seasons within flow regimes.
 estmeans_df <- as.data.frame(summary(estmeans$contrasts, infer = TRUE)) %>%
   mutate(FLOWREGIME = case_match(FLOWREGIME,
                                  "1" ~ "Runoff",
                                  "2" ~ "Groundwater"))
-
 ggplot(estmeans_df, aes(x = estimate, y = contrast)) +
   geom_point()+
   geom_vline(xintercept=0, linetype="dotted", color="red")+
@@ -227,22 +237,11 @@ ggplot(estmeans_df, aes(x = estimate, y = contrast)) +
   facet_wrap(~FLOWREGIME)+
   theme_bw()
 
-# Post-hoc ANOVA of water volume by season and flow regime
-# just to see if the trends match up with the patterns of fish density.
-modvol <- lm(VOLUME ~ SEASON * FLOWREGIME,
-           data = fish,
-           contrasts = list(SEASON = contr.sum))
-
-estmeansvol <- emmeans(modvol, pairwise ~ SEASON | FLOWREGIME)
-estmeansvol$contrasts
-
-# # Confidence intervals for pairwise comparisons of water volumes
-# between seasons within flow regimes.
+# Confidence intervals for water volumes between seasons within flow regimes.
 estmeansvol_df <- as.data.frame(summary(estmeansvol$contrasts, infer = TRUE)) %>%
   mutate(FLOWREGIME = case_match(FLOWREGIME,
                                  "1" ~ "Runoff",
                                  "2" ~ "Groundwater"))
-
 ggplot(estmeansvol_df, aes(x=estimate, y=contrast))+
   geom_point()+
   geom_vline(xintercept=0, linetype="dotted", color="red")+
