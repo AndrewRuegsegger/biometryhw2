@@ -1,0 +1,250 @@
+library(dplyr)
+library(ggplot2)
+library(car)
+library(emmeans)
+library(broom)
+
+####################
+### PRE-ANALYSIS ###
+####################
+
+file.choose()
+fish <- read.csv("C:\\Users\\Andrew\\OneDrive\\Documents\\BIOL 57774\\Homework\\seasons fish den rich hab 03.csv")
+View(fish)
+str(fish)
+
+# Converting predictors to factors
+fish$SEASON <- as.factor(fish$SEASON)
+fish$FLOWREGIME <- as.factor(fish$FLOWREGIME)
+
+### Assessing normality and homogeneity of variances ###
+
+ggplot(data=fish, aes(x=FLOWREGIME, y=TOTDENVOL))+
+  geom_boxplot()+
+  theme_few() # Variances are pretty equal, though there are several outliers.
+
+ggplot(data=fish, aes(x=SEASON, y=TOTDENVOL))+
+  geom_boxplot()+
+  theme_few() # Variances are pretty equal, though there are several outliers.
+
+ggplot(data=fish, aes(x=TOTDENVOL))+
+  geom_histogram()+
+  facet_wrap(~SEASON)+
+  theme_few() # Appears to be quite right-skewed
+
+ggplot(data=fish, aes(x=TOTDENVOL))+
+  geom_histogram()+
+  facet_wrap(~FLOWREGIME)+
+  theme_few() # Appears to be quite right-skewed
+
+mod <- aov(TOTDENVOL ~ SEASON * FLOWREGIME,
+           data = fish)
+
+# Residuals and Shapiro-Wilk test confirm data is not normal, and
+# residuals and Levene's test show heterogeneous variances.
+plot(mod, which = 2)
+hist(mod$residuals)
+shapiro.test(mod$residuals) # p = 1.758e-12
+plot(mod, which = 3)
+leveneTest(mod) # p = 5.779e-06
+
+# Log-transforming response to meet assumptions of normality and homogeneity of variances
+fish <- fish %>%
+  mutate(TOTDENLOG = log(TOTDENVOL+1))
+
+mod1 <- aov(TOTDENLOG ~ SEASON * FLOWREGIME,
+           data = fish)
+
+# Even after transforming, residuals still show some non-normality and heterogeneous variances,
+# and residuals seem to indicate that this is not necessary due to certain outliers.
+plot(mod1, which = 2)
+hist(mod1$residuals)
+shapiro.test(mod1$residuals) # p = 0.05734
+plot(mod1, which = 3)
+leveneTest(mod1) # p = 0.005162
+# In this situation, a non-parametric model may be appropriate, but for the moment
+# I will continue using a two-way ANOVA and evaluate my results, especially since the 
+# non-normality nor the heteroscedasticity is especially egregious.
+
+################################
+### LOG-TRANSFORMED ANALYSES ###
+################################
+
+# Some quick descriptive stats just to see what we might expect from our model.
+fish %>%
+  group_by(SEASON, FLOWREGIME) %>%
+  summarize(MEANDENS = mean(TOTDENLOG, na.rm = TRUE),
+            STD = sd(TOTDENLOG, na.rm = TRUE))
+
+# Visual comparison of the log of total density between seasons and flow regimes.
+ggplot(data=fish, aes(x=SEASON, y=TOTDENLOG, fill=FLOWREGIME))+
+  geom_boxplot()
+
+# Comparing sample sizes
+table(fish$SEASON, fish$FLOWREGIME)
+
+# Two-way ANOVA using lm() and specifying contrast type for use in a Type III ANOVA.
+modlog <- lm(TOTDENLOG ~ SEASON * FLOWREGIME,
+          data = fish,
+          contrasts = list(SEASON = contr.sum))
+
+# Sample sizes are unbalanced, so will use a Type III ANOVA.
+Anova(modlog, type=3)
+
+# There are significant differences in fish density among seasons (p = 0.001).
+# There are not significant differences in fish density among flow regimes (p = 0.848).
+# The relationship between fish density and seasons is different between flow regimes (p < 0.001).
+
+(8.21/(8.21+0.02+13.98+68.17)) * 100 # Season explains 9.08% of variance.
+
+(0.02/(8.21+0.02+13.98+68.17)) * 100 # Flow regime explains 0.02% of variance.
+
+(13.979/(8.21+0.02+13.98+68.17)) * 100 # Interaction explains 15.47% of variance.
+
+# H1: For FLOWREGIME 1, TOTDENLOG == April < August, June, and October
+levels(fish$SEASON)
+con <- c(3,-1,-1,-1) # Comparing April to summer and fall.
+
+contrasts(fish$SEASON) <- cbind(con)
+contrasts(fish$SEASON)
+
+modlog_runoff <- aov(TOTDENLOG ~ SEASON,
+            data = fish %>%
+              filter(FLOWREGIME == 1))
+summary.lm(modlog_runoff) # There are indeed higher fish densities in the summer and fall
+# than in April in runoff/intermittent streams (contrast estimate = -0.18765; p < 0.001).
+
+# H1: More stable fish densities in groundwater streams will be tested via pairwise comparisons
+# using estimated marginal means as opposed to TukeyHSD, as emmeans adjusts for unequal sample sizes
+# and allows for nesting of seasonal comparisons within flow regimes whilst keeping the 
+# family-wise error rate at 5%.
+estmeanslog <- emmeans(modlog, pairwise ~ SEASON | FLOWREGIME)
+estmeanslog$contrasts # Fish densities of groundwater streams do not differ much between seasons but do
+# in runoff/intermittent streams. However, for runoff/intermittent streams, fish density
+# estimates do not differ between April and June, nor between August and October.
+# This makes sense, as showers causing runoff may persist into June, or drought
+# conditions may not be so prevailing at that point in the summer that fish
+# populations are so concentrated. Similarly, the drought conditions that 
+# presumably lead to the higher fish densities in the later months are presumably
+# persistent into October. 
+
+################################
+### NON-TRANSFORMED ANALYSES ###
+################################
+
+# After running these analyses, I found there to be  virtually no differences
+# besides error estimates between transforming and not transforming the
+# response variable, so I will report non-transformed results.
+
+# Some quick descriptive stats just to see what we might expect from our model.
+fish %>%
+  group_by(SEASON, FLOWREGIME) %>%
+  summarize(MEANDENS = mean(TOTDENVOL, na.rm = TRUE),
+            STD = sd(TOTDENVOL, na.rm = TRUE))
+
+# Visual comparison of the log of total density between seasons and flow regimes.
+ggplot(data=fish, aes(x=SEASON, y=TOTDENVOL, fill=FLOWREGIME))+
+  geom_boxplot()
+
+# Comparing sample sizes
+table(fish$SEASON, fish$FLOWREGIME)
+
+# Two-way ANOVA using lm() and specifying contrast type for use in a Type III ANOVA.
+mod <- lm(TOTDENVOL ~ SEASON * FLOWREGIME,
+          data = fish,
+          contrasts = list(SEASON = contr.sum))
+
+# Sample sizes are unbalanced, so will use a Type III ANOVA.
+Anova(mod, type=3)
+
+# There are significant differences in fish density among seasons (p < 0.001).
+# There are not significant differences in fish density among flow regimes (p = 0.547).
+# The relationship between fish density and seasons is different between flow regimes (p < 0.001).
+
+(623.5/(623.5+18+1390.1+6997.8)) * 100 # Season explains 6.91% of variance.
+
+(18/(623.5+18+1390.1+6997.8)) * 100 # Flow regime explains 0.199% of variance.
+
+(1390.1/(623.5+18+1390.1+6997.8)) * 100 # Interaction explains 15.39% of variance.
+
+# H1: For FLOWREGIME 1, TOTDENLOG == April < August, June, and October
+levels(fish$SEASON)
+con <- c(3,-1,-1,-1) # Comparing April to summer and fall.
+
+contrasts(fish$SEASON) <- cbind(con)
+contrasts(fish$SEASON)
+
+modrunoff <- aov(TOTDENVOL ~ SEASON,
+            data = fish %>%
+              filter(FLOWREGIME == 1))
+summary.lm(modrunoff) # There are indeed higher fish densities in the summer and fall
+# than in April in runoff/intermittent streams (contrast estimate = -1.561; p = 0.003).
+
+# H1: More stable fish densities in groundwater streams will be tested via pairwise comparisons
+# using estimated marginal means as opposed to TukeyHSD, as emmeans adjusts for unequal sample sizes
+# and allows for nesting of seasonal comparisons within flow regimes whilst keeping the 
+# family-wise error rate at 5%.
+estmeans <- emmeans(mod, pairwise ~ SEASON | FLOWREGIME)
+estmeans$contrasts # Fish densities of groundwater streams do not differ much between seasons but do
+# in runoff/intermittent streams. However, for runoff/intermittent streams, fish density
+# estimates do not differ between April and June, nor between August and October.
+# This makes sense, as showers causing runoff may persist into June, or drought
+# conditions may not be so prevailing at that point in the summer that fish
+# populations are so concentrated. Similarly, the drought conditions that 
+# presumably lead to the higher fish densities in the later months are presumably
+# persistent into October. 
+
+#############################
+### POST-HOC VOLUME ANOVA ###
+#############################
+
+# Post-hoc ANOVA of water volume by season and flow regime
+# just to see if the trends match up with the patterns of fish density.
+# Thought of doing this after running the rest of the analyses and just included
+# it in the assignment as an aside since we were not asked to do any analysis 
+# as to the why of observed patterns but thought it would be useful to include
+# in the discussion. That's why I don't really mention it in the paper.
+modvol <- lm(VOLUME ~ SEASON * FLOWREGIME,
+             data = fish,
+             contrasts = list(SEASON = contr.sum))
+
+estmeansvol <- emmeans(modvol, pairwise ~ SEASON | FLOWREGIME)
+estmeansvol$contrasts
+
+#####################
+### VISUALIZATION ###
+#####################
+
+# ANOVA Table
+res_anova <- Anova(modlog, type = 3)
+anova_table <- tidy(res_anova)
+write.csv(anova_table, "anova_results1.csv", row.names = FALSE)
+
+# Emmeans table
+res_emmeans <- estmeans$contrasts
+emmeans_table <- tidy(res_emmeans)
+write.csv(emmeans_table, "emmeans_results.csv", row.names = FALSE)
+
+# Confidence intervals for fish densities between seasons within flow regimes.
+estmeans_df <- as.data.frame(summary(estmeans$contrasts, infer = TRUE)) %>%
+  mutate(FLOWREGIME = case_match(FLOWREGIME,
+                                 "1" ~ "Runoff",
+                                 "2" ~ "Groundwater"))
+ggplot(estmeans_df, aes(x = estimate, y = contrast)) +
+  geom_point()+
+  geom_vline(xintercept=0, linetype="dotted", color="red")+
+  geom_errorbarh(aes(xmin=lower.CL, xmax=upper.CL), height = 0.2)+
+  facet_wrap(~FLOWREGIME)+
+  theme_bw()
+
+# Confidence intervals for water volumes between seasons within flow regimes.
+estmeansvol_df <- as.data.frame(summary(estmeansvol$contrasts, infer = TRUE)) %>%
+  mutate(FLOWREGIME = case_match(FLOWREGIME,
+                                 "1" ~ "Runoff",
+                                 "2" ~ "Groundwater"))
+ggplot(estmeansvol_df, aes(x=estimate, y=contrast))+
+  geom_point()+
+  geom_vline(xintercept=0, linetype="dotted", color="red")+
+  geom_errorbarh(aes(xmin=lower.CL, xmax=upper.CL), height=0.2)+
+  facet_wrap(~FLOWREGIME)+
+  theme_bw()
